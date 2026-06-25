@@ -38,6 +38,24 @@ cleanup() {
     }
 }
 
+# ---- ssh agent ----
+
+SSH_AUTH_SOCK=""
+SSH_AGENT_PID=""
+AGENT_ENV="${XDG_RUNTIME_DIR}/steffai-${TARGET_USER}.ssh-agent.env"
+
+load_ssh_agent() {
+    if [ -f "$AGENT_ENV" ]; then
+        source "$AGENT_ENV"
+        if [ -n "${SSH_AUTH_SOCK:-}" ] && [ -S "$SSH_AUTH_SOCK" ] && \
+           [ -n "${SSH_AGENT_PID:-}" ] && kill -0 "$SSH_AGENT_PID" 2>/dev/null; then
+            return 0
+        fi
+    fi
+    sudo -u "$TARGET_USER" ssh-agent -s > "$AGENT_ENV"
+    source "$AGENT_ENV"
+}
+
 # ---- xauthority ----
 
 setup_xauthority() {
@@ -99,11 +117,12 @@ launch() {
     fi
     sudo -u "$TARGET_USER" \
         "${TARGET_ENV[@]}" \
+        SSH_AUTH_SOCK="${SSH_AUTH_SOCK}" \
+        SSH_AGENT_PID="${SSH_AGENT_PID}" \
         SUDO_XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR}" \
         SUDO_WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-}" \
         XAUTHORITY="${XAUTHORITY_FILE}" \
         LANG="${TARGET_LANG}" \
-        ssh-agent \
         "${args[@]}"
 }
 
@@ -111,6 +130,7 @@ launch() {
 
 register_instance
 trap cleanup EXIT
+load_ssh_agent
 collect_env
 setup_xauthority
 resolve_args
