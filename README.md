@@ -129,3 +129,16 @@ Potential options:
 
 Google authentication no repository-related permissions, so I guess it can safely be used.
 
+
+# Setup working dirs
+
+* full write access to all group members (group: users)
+
+
+```
+TARGET="/local/work/"
+PERM="g::rwx,o::rx"
+setfacl -R -m $PERM -d -m $PERM "${TARGET}"
+chgrp -R users "${TARGET}"
+find "${TARGET}" -type d -exec chmod g+s {} \;
+```
