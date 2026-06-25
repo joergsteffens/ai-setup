@@ -93,9 +93,9 @@ grant_acls() {
 launch() {
     echo "Launching environment for OpenCode as user '$TARGET_USER'"
     if [ -v WAYLAND_DISPLAY ]; then
-        echo "Wayland socket: ${SOCKET_PATH}"
         echo "To run Wayland programs, set:"
-        echo "  export XDG_RUNTIME_DIR=\"\${SUDO_XDG_RUNTIME_DIR}\""
+        echo "export XDG_RUNTIME_DIR=\"\${SUDO_XDG_RUNTIME_DIR}\""
+        echo "export WAYLAND_DISPLAY=\"\${SUDO_WAYLAND_DISPLAY}\""
     fi
     sudo -u "$TARGET_USER" \
         "${TARGET_ENV[@]}" \
