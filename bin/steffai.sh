@@ -47,13 +47,14 @@ AGENT_ENV="${XDG_RUNTIME_DIR}/steffai-${TARGET_USER}.ssh-agent.env"
 load_ssh_agent() {
     if [ -f "$AGENT_ENV" ]; then
         source "$AGENT_ENV"
-        if [ -n "${SSH_AUTH_SOCK:-}" ] && [ -S "$SSH_AUTH_SOCK" ] && \
-           [ -n "${SSH_AGENT_PID:-}" ] && kill -0 "$SSH_AGENT_PID" 2>/dev/null; then
-            return 0
-        fi
     fi
-    sudo -u "$TARGET_USER" ssh-agent -s > "$AGENT_ENV"
-    source "$AGENT_ENV"
+    if ! sudo -u "$TARGET_USER" \
+        SSH_AUTH_SOCK="${SSH_AUTH_SOCK:-}" \
+        SSH_AGENT_PID="${SSH_AGENT_PID:-}" \
+        sh -c 'test -n "$SSH_AUTH_SOCK" && test -S "$SSH_AUTH_SOCK" && test -n "$SSH_AGENT_PID" && kill -0 "$SSH_AGENT_PID" 2>/dev/null'; then
+        sudo -u "$TARGET_USER" ssh-agent -s > "$AGENT_ENV"
+        source "$AGENT_ENV"
+    fi
 }
 
 # ---- xauthority ----
