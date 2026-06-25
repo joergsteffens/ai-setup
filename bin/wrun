@@ -1,0 +1,13 @@
+#!/bin/bash
+set -e
+
+if [ -z "${SUDO_XDG_RUNTIME_DIR:-}" ]; then
+    echo "Error: SUDO_XDG_RUNTIME_DIR is not set." >&2
+    echo "This script must be run inside a steffai session." >&2
+    exit 1
+fi
+
+export XDG_RUNTIME_DIR="$SUDO_XDG_RUNTIME_DIR"
+[ -n "${WAYLAND_DISPLAY:-}" ] || export WAYLAND_DISPLAY="${SUDO_WAYLAND_DISPLAY:-}"
+
+exec "$@"
