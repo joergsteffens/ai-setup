@@ -81,8 +81,9 @@ collect_env() {
     [ -v DISPLAY ] || { echo "Error: DISPLAY is not set." >&2; exit 1; }
     TARGET_ENV+=("DISPLAY=${DISPLAY}" "GIT_NAME=${GIT_NAME}" "GIT_EMAIL=${GIT_EMAIL}")
 
+    TARGET_ENV+=("SUDO_XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR}")
     if [ -v WAYLAND_DISPLAY ]; then
-        TARGET_ENV+=("WAYLAND_DISPLAY=${WAYLAND_DISPLAY}")
+        TARGET_ENV+=("SUDO_WAYLAND_DISPLAY=${WAYLAND_DISPLAY}")
         SOCKET_PATH="$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY"
     fi
 }
@@ -120,8 +121,6 @@ launch() {
         "${TARGET_ENV[@]}" \
         SSH_AUTH_SOCK="${SSH_AUTH_SOCK}" \
         SSH_AGENT_PID="${SSH_AGENT_PID}" \
-        SUDO_XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR}" \
-        SUDO_WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-}" \
         XAUTHORITY="${XAUTHORITY_FILE}" \
         LANG="${TARGET_LANG}" \
         "${args[@]}"
