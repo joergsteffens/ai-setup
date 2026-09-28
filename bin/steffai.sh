@@ -1,74 +1,73 @@
 #!/bin/bash
 
+# Lightweight variant of steffai-x.sh, when OpenCode is only used as a
+# web server: no X11/Wayland setup, no xauth, no instance tracking.
+#
+# Usage:
+#   steffai.sh                 -> login shell as the isolated user
+#   steffai.sh opencode [args] -> run "opencode serve" with DEBUG logs
+#   steffai.sh <cmd> [args]    -> run arbitrary command as the isolated user
+
 set -u
 set -e
 
 TARGET_USER="${TARGET_USER:-steffai}"
 TARGET_LANG="C.UTF-8"
-
-# ---- paths ----
-
-LOCK_DIR="${XDG_RUNTIME_DIR}/steffai-${TARGET_USER}.instances"
-INSTANCE_FILE=""
-
-XAUTHORITY_FILE="${XDG_RUNTIME_DIR}/steffai-${TARGET_USER}.xauth"
-
-SOCKET_PATH=""
-
-# ---- instance tracking ----
-
-register_instance() {
-    mkdir -p "$LOCK_DIR"
-    for f in "${LOCK_DIR}"/inst.*; do
-        [ -f "$f" ] || continue
-        pid="${f##*.}"
-        kill -0 "$pid" 2>/dev/null || rm -f "$f"
-    done
-    INSTANCE_FILE="${LOCK_DIR}/inst.$$"
-    : > "$INSTANCE_FILE"
-}
-
-cleanup() {
-    rm -f "${INSTANCE_FILE}" 2>/dev/null || true
-    rmdir "${LOCK_DIR}" 2>/dev/null && {
-        echo "Cleaning up Wayland ACL permissions..."
-        [ -n "$SOCKET_PATH" ] && setfacl -x u:"$TARGET_USER" "$SOCKET_PATH" 2>/dev/null || true
-        setfacl -x u:"$TARGET_USER" "$XDG_RUNTIME_DIR" 2>/dev/null || true
-        rm -f "${XAUTHORITY_FILE}" 2>/dev/null || true
-    }
-}
+OPENCODE_SERVE_LOG_FLAGS=(--print-logs --log-level DEBUG)
 
 # ---- ssh agent ----
 
+# The agent socket itself lives under /tmp/ssh-* owned by the target user
+# (created by ssh-agent); only the calling user touches AGENT_ENV.
 SSH_AUTH_SOCK=""
 SSH_AGENT_PID=""
 AGENT_ENV="${XDG_RUNTIME_DIR}/steffai-${TARGET_USER}.ssh-agent.env"
 
-load_ssh_agent() {
-    if [ -f "$AGENT_ENV" ]; then
-        source "$AGENT_ENV"
-    fi
-    if ! sudo -u "$TARGET_USER" \
-        SSH_AUTH_SOCK="${SSH_AUTH_SOCK:-}" \
-        SSH_AGENT_PID="${SSH_AGENT_PID:-}" \
-        sh -c 'test -n "$SSH_AUTH_SOCK" && test -S "$SSH_AUTH_SOCK" && test -n "$SSH_AGENT_PID" && kill -0 "$SSH_AGENT_PID" 2>/dev/null'; then
-        sudo -u "$TARGET_USER" ssh-agent -s > "$AGENT_ENV"
-        source "$AGENT_ENV"
-    fi
+# Returns success if the recorded agent socket is still alive.
+agent_alive()
+{
+  sudo -u "$TARGET_USER" \
+    SSH_AUTH_SOCK="${SSH_AUTH_SOCK:-}" \
+    SSH_AGENT_PID="${SSH_AGENT_PID:-}" \
+    sh -c 'test -n "$SSH_AUTH_SOCK" && test -S "$SSH_AUTH_SOCK" && test -n "$SSH_AGENT_PID" && kill -0 "$SSH_AGENT_PID" 2>/dev/null'
 }
 
-# ---- xauthority ----
+load_ssh_agent()
+{
+  if [ -f "$AGENT_ENV" ]; then
+    source "$AGENT_ENV"
+  fi
+  if ! agent_alive; then
+    sudo -u "$TARGET_USER" ssh-agent -s >"$AGENT_ENV"
+    source "$AGENT_ENV"
+  fi
+}
 
-setup_xauthority() {
-    if [ ! -f "$XAUTHORITY_FILE" ]; then
-        local tmp
-        tmp=$(mktemp -p "${XDG_RUNTIME_DIR}" xauth-tmp.XXXXXXXXXX)
-        xauth extract "$tmp" "$DISPLAY"
-        if ! mv -n "$tmp" "$XAUTHORITY_FILE" 2>/dev/null; then
-            rm -f "$tmp"
-        fi
-    fi
-    setfacl -m u:"$TARGET_USER":r "$XAUTHORITY_FILE" 2>/dev/null || true
+# ---- ssh agent keys ----
+
+# ssh-add -l exit codes: 0 = key(s) loaded, 1 = agent empty, 2 = not reachable.
+# The check must run as the target user (the agent socket is owned by it).
+check_agent_keys()
+{
+  local status=0 out
+  out=$(sudo -u "$TARGET_USER" \
+    SSH_AUTH_SOCK="${SSH_AUTH_SOCK}" \
+    SSH_AGENT_PID="${SSH_AGENT_PID}" \
+    ssh-add -l 2>&1) || status=$?
+  case $status in
+    0)
+      echo "SSH agent: loaded keys:"
+      echo "$out"
+      ;;
+    1)
+      echo "Warning: SSH agent has no keys loaded; git/GitHub access will fail."
+      echo "         Run 'ssh-add' inside a steffai shell."
+      ;;
+    *)
+      echo "Warning: cannot contact SSH agent (stale socket?)."
+      echo "         Re-run this script to pick up a fresh agent."
+      ;;
+  esac
 }
 
 # ---- environment ----
@@ -77,62 +76,52 @@ GIT_NAME="$(git config user.name)"
 GIT_EMAIL="$(git config user.email)"
 
 TARGET_ENV=()
-collect_env() {
-    [ -v DISPLAY ] || { echo "Error: DISPLAY is not set." >&2; exit 1; }
-    TARGET_ENV+=("DISPLAY=${DISPLAY}" "GIT_NAME=${GIT_NAME}" "GIT_EMAIL=${GIT_EMAIL}")
-
-    TARGET_ENV+=("SUDO_XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR}")
-    if [ -v WAYLAND_DISPLAY ]; then
-        TARGET_ENV+=("SUDO_WAYLAND_DISPLAY=${WAYLAND_DISPLAY}")
-        SOCKET_PATH="$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY"
-    fi
+collect_env()
+{
+  TARGET_ENV+=("GIT_NAME=${GIT_NAME}" "GIT_EMAIL=${GIT_EMAIL}")
 }
 
 # ---- arguments ----
 
 args=("$@")
-resolve_args() {
-    if [ ${#args[@]} -eq 0 ]; then
-        args=("bash" "--login")
-    elif [ "${args[0]}" = "opencode" ]; then
-        local home
-        home=$(eval echo "~${TARGET_USER}")
-        args[0]="${home}/.opencode/bin/opencode"
+resolve_args()
+{
+  if [ ${#args[@]} -eq 0 ]; then
+    args=("bash" "--login")
+  elif [ "${args[0]}" = "opencode" ]; then
+    local home
+    home=$(eval echo "~${TARGET_USER}")
+    args[0]="${home}/.opencode/bin/opencode"
+    # "steffai.sh opencode" starts the web server; extra args go to opencode.
+    if [ ${#args[@]} -eq 1 ] || [ "${args[1]}" != "serve" ]; then
+      args=("${args[0]}" "${OPENCODE_SERVE_LOG_FLAGS[@]}" serve "${args[@]:1}")
+    else
+      args=("${args[0]}" "${OPENCODE_SERVE_LOG_FLAGS[@]}" "${args[@]:1}")
     fi
-}
-
-# ---- acls ----
-
-grant_acls() {
-    setfacl -m u:"$TARGET_USER":x "$XDG_RUNTIME_DIR"
-    [ -n "$SOCKET_PATH" ] && setfacl -m u:"$TARGET_USER":rw "$SOCKET_PATH"
+  fi
 }
 
 # ---- launch ----
 
-launch() {
-    echo "Launching environment for OpenCode as user '$TARGET_USER'"
-    if [ -v WAYLAND_DISPLAY ]; then
-        echo "To run Wayland programs, set:"
-        echo "export XDG_RUNTIME_DIR=\"\${SUDO_XDG_RUNTIME_DIR}\""
-        echo "export WAYLAND_DISPLAY=\"\${SUDO_WAYLAND_DISPLAY}\""
-    fi
-    sudo -u "$TARGET_USER" \
-        "${TARGET_ENV[@]}" \
-        SSH_AUTH_SOCK="${SSH_AUTH_SOCK}" \
-        SSH_AGENT_PID="${SSH_AGENT_PID}" \
-        XAUTHORITY="${XAUTHORITY_FILE}" \
-        LANG="${TARGET_LANG}" \
-        "${args[@]}"
+launch()
+{
+  echo "Launching environment for OpenCode as user '$TARGET_USER'."
+  echo "For the full TUI/GUI environment use 'steffai-x.sh' instead."
+  echo "Hint: 'steffai.sh opencode' starts the opencode server (DEBUG logs)."
+  echo "Start it manually by:"
+  echo "opencode ${OPENCODE_SERVE_LOG_FLAGS[*]} serve"
+  sudo -u "$TARGET_USER" \
+    "${TARGET_ENV[@]}" \
+    SSH_AUTH_SOCK="${SSH_AUTH_SOCK}" \
+    SSH_AGENT_PID="${SSH_AGENT_PID}" \
+    LANG="${TARGET_LANG}" \
+    "${args[@]}"
 }
 
 # ---- main ----
 
-register_instance
-trap cleanup EXIT
 load_ssh_agent
+check_agent_keys
 collect_env
-setup_xauthority
 resolve_args
-grant_acls
 launch

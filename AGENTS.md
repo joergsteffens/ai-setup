@@ -30,3 +30,13 @@ Every commit must end with `Co-authored-by:` using the **exact full model ID** f
 ## Communication
 
 When uncertain, ask clarifying questions (1-2 sentences). Confirm before destructive operations (rebase, squash, amend, reset, force-push).
+
+## Shell script formatting
+
+Format all shell scripts with `shfmt` (no flags needed - options are predefined in `.editorconfig`):
+
+```bash
+shfmt -w <script.sh>
+```
+
+This applies: `--indent=2 --binary-next-line --case-indent --func-next-line`. Always run it after editing `.sh` files; never use tabs for indentation.

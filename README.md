@@ -30,6 +30,8 @@ This isolates:
 
 from the main workstation user.
 
+However, on my system, all users of the group `users` should be able to locally access the source code files, so they are able to also work on the code.
+
 ## Initial Setup
 
 ### Create a new GitHub account
@@ -90,37 +92,36 @@ All repositories should be cloned as user `steffai`.
 
 Install OpenCode while logged in as `steffai`.
 
-Refer to the official documentation:
-
-https://opencode.ai
+Refer to the official documentation: https://opencode.ai
 
 ## Running OpenCode
+
+Two helper scripts are available; internally both use `sudo` to switch
+to the isolated account before starting OpenCode.
+
+### `steffai.sh` - lightweight variant
+
+For the common case where OpenCode mostly runs as a web server
+(`opencode serve`). No X11/Wayland/xauth setup, no instance tracking.
+
+* `steffai.sh` - login shell as the isolated user
+* `steffai.sh opencode` - runs `opencode --print-logs --log-level DEBUG serve`
+  (extra arguments are passed to `opencode`; explicit `serve` is not duplicated)
+* `steffai.sh <cmd>` - run arbitrary command as the isolated user
+
+### `steffai-x.sh` - full GUI variant
 
 Switch to the user steffai by running the script.
 Afterwards you can start opencode.
 
-Internally it uses `sudo` to switch to the isolated account before starting OpenCode.
-
-## Optional: OpenRouter
-
-OpenRouter provides access to many LLMs through a single API.
-
-Website:
-
-https://openrouter.ai/
-
-Advantages:
-
-* Access to multiple model providers
-* Free models available
-
-Some free models are bundled through:
-
-```text
-openrouter/free
-```
+Additionally sets up X11 (`xauth`) and Wayland access (socket ACLs),
+tracks running instances for cleanup, and is the right choice for
+interactive TUI sessions, e.g. `steffai-x.sh opencode`.
+Wayland programs need `wrun` (see `bin/wrun`) inside such a session.
 
 ## Connect Main User to OpenCode
+
+### https://opencode.ai/console/
 
 Potential options:
 
@@ -129,6 +130,9 @@ Potential options:
 
 Google authentication no repository-related permissions, so I guess it can safely be used.
 
+### https://opencode.ai/console/
+
+https://console.opencode.ai additionally offers creating a user account with username and password.
 
 # Setup working dirs
 
